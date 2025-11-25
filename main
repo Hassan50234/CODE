@@ -1,1 +1,48 @@
 print('HAssan ur Rehman')
+// ======================= LOAD SHAPEFILE =======================
+var mines = ee.FeatureCollection('projects/steel-climber-469609-d1/assets/Balochistan_Mining_Sites');
+Map.centerObject(mines, 8);
+
+// ======================= LOAD SENTINEL-2 =======================
+var collection = ee.ImageCollection('COPERNICUS/S2_SR')
+  .filterBounds(mines)
+  .filterDate('2020-01-01', '2025-01-01')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+  .select(['B2','B3','B4','B8','B11']);
+
+// ======================= ADD INDICES =======================
+function addIndices(img) {
+  var red  = img.select('B4');
+  var nir  = img.select('B8');
+  var blue = img.select('B2');
+  var swir = img.select('B11');
+
+  var ndmri = red.subtract(swir).divide(red.add(swir)).rename('NDMRI');
+  var bsi   = red.add(swir).subtract(nir.add(blue))
+                  .divide(red.add(swir).add(nir).add(blue)).rename('BSI');
+  var ndbi  = swir.subtract(nir).divide(swir.add(nir)).rename('NDBI');
+
+  return img.addBands([ndmri, bsi, ndbi])
+            .copyProperties(img, ['system:time_start']);
+}
+
+var withIndices = collection.map(addIndices);
+
+// ======================= LIMIT FIRST 350 IMAGES =======================
+var first350 = withIndices.toList(350);
+
+// ======================= EXPORT =======================
+for (var i = 0; i < 350; i++) {
+  var img = ee.Image(first350.get(i));
+  var date = ee.Date(img.get('system:time_start')).format('YYYYMMdd').getInfo();
+
+  Export.image.toDrive({
+    image: img.select(['B4','B3','B2','NDMRI','BSI','NDBI']),
+    description: 'MiningImage_Part1_' + date + '_' + i,
+    folder: 'MiningDataset',
+    scale: 10,
+    region: mines.geometry(),
+    maxPixels: 1e13
+  });
+}
+
